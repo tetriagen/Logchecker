@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from collections import OrderedDict
+from insights import Insights
 
 FIELDS = ['frame.number', 'frame.time_epoch', 'frame.len', 'ip.src', 'ipv6.src',
           'ip.dst', 'ipv6.dst', 'tcp.srcport', 'udp.srcport', 'tcp.dstport',
@@ -30,10 +31,12 @@ def decode(row):
 class Analyzer:
     def __init__(self, capacity=4096):
         self.flows = OrderedDict()
+        self.insights = Insights(capacity)
         self.capacity = capacity
         self.packets = self.bytes = self.skipped = self.evicted = 0
 
     def feed(self, p):
+        self.insights.feed(p)
         self.packets += 1
         self.bytes += p['size']
         if not p['src'] or not p['dst']:
@@ -41,7 +44,7 @@ class Analyzer:
             return None
         key = (p['transport'], tuple(sorted(((p['src'], p['sport']), (p['dst'], p['dport'])))))
         new = key not in self.flows
-        flow = self.flows.setdefault(key, dict(packets=0, bytes=0))
+        flow = self.flows.setdefault(key, dict(packets=0, bytes=0, tls_seen=False))
         flow['packets'] += 1
         flow['bytes'] += p['size']
         self.flows.move_to_end(key)
@@ -57,7 +60,8 @@ class Analyzer:
         elif p['syn'] and not p['ack']:
             explanation = 'Попытка открыть TCP-соединение.'
             note = 'Этот пакет ещё не подтверждает успешное подключение.'
-        elif p['tls']:
+        elif p['tls'] and not flow['tls_seen']:
+            flow['tls_seen'] = True
             explanation = 'Обнаружен пакет TLS.'
             note = 'Содержимое приложения может быть зашифровано; URL и текст запросов здесь не определяются.'
         elif new:

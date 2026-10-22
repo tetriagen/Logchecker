@@ -43,20 +43,37 @@ async function poll() {
     $('packets').textContent=s.stats.packets.toLocaleString('ru');
     $('bytes').textContent=s.stats.bytes<1024 ? s.stats.bytes+' Б' : (s.stats.bytes/1024).toFixed(1)+' КиБ';
     $('flows').textContent=s.stats.tracked_flows;
-    $('count').textContent=s.total_events+' событий';
-    $('coverage').textContent=`Кадров без IP: ${s.stats.non_ip} · Ошибок разбора: ${s.malformed} · Вытеснено соединений: ${s.stats.evicted_flows}`;
+    $('count').textContent=s.conversations.length+' групп соединений';
+    $('coverage').textContent=`Кадров без IP: ${s.stats.non_ip} · Ошибок разбора: ${s.malformed} · Вытеснено: ${s.stats.evicted_flows}. ${s.coverage}`;
     if(s.error) $('error').textContent=s.error;
-    const sig=JSON.stringify([s.total_events,s.events[0]?.time,s.state]);
-    if(sig!==signature && s.events.length) {
+    const sig=JSON.stringify([s.stats.packets,s.state,s.conversations[0]?.first]);
+    if(sig!==signature) {
       const opened=new Set([...$('events').querySelectorAll('details[open]')].map(e=>e.dataset.frame));
       $('events').replaceChildren();
-      for(const e of [...s.events].reverse()) {
-        const d=document.createElement('details'); d.dataset.frame=String(e.frame);d.open=opened.has(d.dataset.frame);
-        const title=document.createElement('summary');title.textContent=e.explanation;d.append(title);
-        for(const text of [`${e.src}:${e.sport} → ${e.dst}:${e.dport}`,e.note]) {const p=document.createElement('p');p.textContent=text;d.append(p);}
-        const proof=document.createElement('small');proof.textContent=`Пакет #${e.frame} · ${e.protocol} · ${new Date(e.time*1000).toLocaleTimeString('ru')}`;d.append(proof);$('events').append(d);
+      const textNode=(tag,text,parent)=>{const n=document.createElement(tag);n.textContent=text;parent.append(n);return n;};
+      for(const a of [...s.alerts].reverse()) {
+        const box=document.createElement('article');box.className='alert-card';
+        textNode('strong','Требует проверки: '+a.title,box);
+        textNode('p',a.src+' → '+a.dst+' · '+a.explanation,box);
+        textNode('p',a.action,box);
+        textNode('small','Порты: '+a.ports.join(', ')+' · Пакеты: '+a.frames.join(', '),box);
+        $('events').append(box);
       }
-    } else if(!s.events.length && s.state!=='idle') { $('events').textContent=busy?'Ожидаем пакеты и события…':'Событий не обнаружено. Проверьте счётчики и выбранный источник.'; }
+      if(!s.alerts.length && s.stats.packets) textNode('p','Признаков сканирования по текущему правилу не найдено. Это не проверка всех видов угроз.',$('events'));
+      for(const e of s.conversations) {
+        const d=document.createElement('details');d.dataset.frame=String(e.id);d.open=opened.has(d.dataset.frame);
+        const endpoint=(ip,port)=>(ip.includes(':')?'['+ip+']':ip)+(port?':'+port:'');
+        textNode('summary',endpoint(e.src,e.sport)+' ⇄ '+endpoint(e.dst,e.dport)+' · '+(e.tls?'TLS':e.protocol)+(e.attention?' · Сброс TCP':''),d);
+        // Main explanation and volume are visible without opening the evidence.
+        const brief=document.createElement('div');brief.className='conversation-brief';
+        textNode('p',e.explanation,brief);
+        textNode('small',e.packets+' пакетов · '+(e.bytes/1024).toFixed(1)+' КиБ · '+(e.last-e.first).toFixed(1)+' с',brief);
+        for(const text of [e.note,e.identity_note,`От первого адреса: ${e.sent} Б; обратно: ${e.received} Б`]) textNode('p',text,d);
+        textNode('small',`Пакеты #${e.first_frame}–#${e.last_frame} (границы группы); признаки: `+Object.entries(e.evidence).map(([k,v])=>k+' #'+v).join(', '),d);
+        const card=document.createElement('article');card.className='conversation';card.append(brief,d);$('events').append(card);
+      }
+      if(!s.conversations.length) textNode('p',busy?'Ожидаем трафик…':'Начните захват или выберите PCAP, чтобы увидеть соединения.',$('events'));
+    }
     signature=sig;
   } catch(e) { $('status').textContent='Нет связи с локальным сервером'; }
   setTimeout(poll,700);

@@ -35,7 +35,8 @@ class Session:
     def __init__(self):
         self.lock = threading.Lock()
         self.events = deque(maxlen=300)
-        self.stats = Analyzer().summary()
+        self.analyzer = Analyzer()
+        self.stats = self.analyzer.summary()
         self.state = 'idle'
         self.error = ''
         self.stop_event = threading.Event()
@@ -52,7 +53,8 @@ class Session:
             if self.worker and self.worker.is_alive():
                 raise ValueError('Сначала остановите текущую сессию.')
             self.events.clear()
-            self.stats = Analyzer().summary()
+            self.analyzer = Analyzer()
+            self.stats = self.analyzer.summary()
             self.error = ''
             self.total_events = self.malformed = 0
             self.state = 'running'
@@ -61,7 +63,7 @@ class Session:
             self.worker.start()
 
     def run(self, executable, interface, pcap, duration):
-        analyzer = Analyzer()
+        analyzer = self.analyzer
         errors = deque(maxlen=20)
         proc = None
         reader = None
@@ -79,7 +81,8 @@ class Session:
                 proc.terminate()
             for row in csv.reader(proc.stdout, delimiter='\t'):
                 try:
-                    event = analyzer.feed(decode(row))
+                    with self.lock:
+                        event = analyzer.feed(decode(row))
                 except (ValueError, KeyError):
                     with self.lock:
                         self.malformed += 1
@@ -131,7 +134,7 @@ class Session:
     def snapshot(self):
         with self.lock:
             return dict(state=self.state, error=self.error, stats=self.stats.copy(),
-                        events=list(self.events), total_events=self.total_events, malformed=self.malformed,
+                        **self.analyzer.insights.snapshot(), events=list(self.events), total_events=self.total_events, malformed=self.malformed,
                         busy=bool(self.worker and self.worker.is_alive()))
 
 
