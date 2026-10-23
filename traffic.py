@@ -11,7 +11,9 @@ from insights import Insights
 FIELDS = ['frame.number', 'frame.time_epoch', 'frame.len', 'ip.src', 'ipv6.src',
           'ip.dst', 'ipv6.dst', 'tcp.srcport', 'udp.srcport', 'tcp.dstport',
           'udp.dstport', 'dns.qry.name', 'dns.flags.response', 'tcp.flags.syn',
-          'tcp.flags.ack', 'tcp.flags.reset', 'tls.record.content_type']
+          'tcp.flags.ack', 'tcp.flags.reset', 'tls.record.content_type',
+          'tls.handshake.extensions_server_name', 'http.host', 'dns.a', 'dns.aaaa',
+          'dns.resp.ttl', 'dns.resp.name', 'dns.resp.type', 'dns.count.answers', 'dns.flags.rcode']
 
 
 def decode(row):
@@ -25,7 +27,11 @@ def decode(row):
                 transport='TCP' if p['tcp.srcport'] else 'UDP' if p['udp.srcport'] else 'OTHER',
                 dns=p['dns.qry.name'], response=p['dns.flags.response'].lower() in ('1', 'true'),
                 syn=p['tcp.flags.syn'].lower() in ('1', 'true'), ack=p['tcp.flags.ack'].lower() in ('1', 'true'),
-                reset=p['tcp.flags.reset'].lower() in ('1', 'true'), tls=bool(p['tls.record.content_type']))
+                reset=p['tcp.flags.reset'].lower() in ('1', 'true'), tls=bool(p['tls.record.content_type']),
+                sni=p['tls.handshake.extensions_server_name'], http_host=p['http.host'],
+                dns_a=p['dns.a'], dns_aaaa=p['dns.aaaa'], dns_ttl=p['dns.resp.ttl'],
+                dns_owner=p['dns.resp.name'], dns_type=p['dns.resp.type'],
+                dns_answers=p['dns.count.answers'], dns_rcode=p['dns.flags.rcode'])
 
 
 class Analyzer:

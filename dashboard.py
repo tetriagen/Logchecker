@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from traffic import Analyzer, command, decode
+from identity import SocketOwners
 
 ROOT = Path(__file__).resolve().parent
 MAX_UPLOAD = 64 * 1024 * 1024
@@ -44,6 +45,7 @@ class Session:
         self.worker = None
         self.total_events = 0
         self.malformed = 0
+        self.process_status = 'Процессы определяются только при живом захвате на этом компьютере.'
 
     def start(self, interface=None, pcap=None, duration=60):
         executable = shutil.which('tshark')
@@ -58,6 +60,8 @@ class Session:
             self.error = ''
             self.total_events = self.malformed = 0
             self.state = 'running'
+            self.process_status = ('PCAP: сведения о процессах отсутствуют; текущие процессы не сопоставляются с записью.'
+                                   if pcap else 'Определение процессов: запуск…')
             self.stop_event.clear()
             self.worker = threading.Thread(target=self.run, args=(executable, interface, pcap, duration), daemon=True)
             self.worker.start()
@@ -67,7 +71,13 @@ class Session:
         errors = deque(maxlen=20)
         proc = None
         reader = None
+        owners = None
         try:
+            if not pcap:
+                owners = SocketOwners()
+                owners.start()
+                with self.lock:
+                    self.process_status = owners.status
             proc = subprocess.Popen(command(executable, interface, pcap, duration), stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
             with self.lock:
@@ -81,8 +91,13 @@ class Session:
                 proc.terminate()
             for row in csv.reader(proc.stdout, delimiter='\t'):
                 try:
+                    packet = decode(row)
+                    if owners:
+                        packet['applications'] = owners.lookup(packet)
                     with self.lock:
-                        event = analyzer.feed(decode(row))
+                        if owners:
+                            self.process_status = owners.status
+                        event = analyzer.feed(packet)
                 except (ValueError, KeyError):
                     with self.lock:
                         self.malformed += 1
@@ -105,6 +120,8 @@ class Session:
                 self.state = 'error'
                 self.error = str(exc)
         finally:
+            if owners:
+                owners.close()
             if proc:
                 if proc.poll() is None:
                     proc.kill()
@@ -134,6 +151,7 @@ class Session:
     def snapshot(self):
         with self.lock:
             return dict(state=self.state, error=self.error, stats=self.stats.copy(),
+                        process_status=self.process_status,
                         **self.analyzer.insights.snapshot(), events=list(self.events), total_events=self.total_events, malformed=self.malformed,
                         busy=bool(self.worker and self.worker.is_alive()))
 

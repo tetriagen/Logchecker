@@ -45,6 +45,7 @@ async function poll() {
     $('flows').textContent=s.stats.tracked_flows;
     $('count').textContent=s.conversations.length+' групп соединений';
     $('coverage').textContent=`Кадров без IP: ${s.stats.non_ip} · Ошибок разбора: ${s.malformed} · Вытеснено: ${s.stats.evicted_flows}. ${s.coverage}`;
+    $('identityStatus').textContent=s.process_status;
     if(s.error) $('error').textContent=s.error;
     const sig=JSON.stringify([s.stats.packets,s.state,s.conversations[0]?.first]);
     if(sig!==signature) {
@@ -66,9 +67,20 @@ async function poll() {
         textNode('summary',endpoint(e.src,e.sport)+' ⇄ '+endpoint(e.dst,e.dport)+' · '+(e.tls?'TLS':e.protocol)+(e.attention?' · Сброс TCP':''),d);
         // Main explanation and volume are visible without opening the evidence.
         const brief=document.createElement('div');brief.className='conversation-brief';
+        const apps=e.applications.length ? [...new Set(e.applications.map(a=>a.name))].join(' / ') : 'Приложение неизвестно';
+        const sites=e.sites.length ? [...new Set(e.sites.map(s=>s.name))].join(' / ') :
+          e.dns_candidates.length ? 'Возможно: '+[...new Set(e.dns_candidates.map(s=>s.name))].join(' / ') :
+          e.dns.length ? 'DNS: '+e.dns.join(' / ') : 'Сайт не определён';
+        textNode('h3',apps+' · '+sites,brief).className='identity-title';
+        const sources=e.sites.length ? [...new Set(e.sites.map(s=>s.source))].join(', ') :
+          e.dns_candidates.length ? 'Подсказка DNS — не подтверждено' : e.dns.length ? 'DNS-запрос, не посещение сайта' : 'Имя не видно в захвате';
+        textNode('small',sources,brief).className='identity-source';
         textNode('p',e.explanation,brief);
         textNode('small',e.packets+' пакетов · '+(e.bytes/1024).toFixed(1)+' КиБ · '+(e.last-e.first).toFixed(1)+' с',brief);
         for(const text of [e.note,e.identity_note,`От первого адреса: ${e.sent} Б; обратно: ${e.received} Б`]) textNode('p',text,d);
+        for(const a of e.applications) textNode('p',`${a.name} · PID ${a.pid} · ${endpoint(a.local_ip,a.local_port)} · ${a.source} · пакет #${a.frame}`,d);
+        if(!e.applications.length) textNode('p','Процесс не найден: возможны короткий сокет, недостаточные права, другая машина или анализ PCAP.',d);
+        for(const name of [...e.sites,...e.dns_candidates]) textNode('p',`${name.name} · ${name.source} · пакет #${name.frame}`+(name.confidence==='candidate'?' · связь предположительная, DNS действовал во время наблюдения':''),d);
         textNode('small',`Пакеты #${e.first_frame}–#${e.last_frame} (границы группы); признаки: `+Object.entries(e.evidence).map(([k,v])=>k+' #'+v).join(', '),d);
         const card=document.createElement('article');card.className='conversation';card.append(brief,d);$('events').append(card);
       }
